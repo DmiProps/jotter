@@ -9,8 +9,8 @@ import (
 
 	// Jotter packages.
 	"github.com/dmiprops/jotter/cmd"
-	"github.com/dmiprops/jotter/modules/setting"
 	"github.com/dmiprops/jotter/modules/log"
+	"github.com/dmiprops/jotter/modules/setting"
 
 	// Vendor packages.
 	"github.com/urfave/cli"
@@ -21,6 +21,7 @@ const Version = "0.1.0-dev"
 
 func init() {
 	setting.AppVer = Version
+	setting.Protocol = "http"
 }
 
 func main() {

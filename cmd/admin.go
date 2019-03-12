@@ -9,9 +9,11 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"golang.org/x/crypto/ssh/terminal"
 
 	// Jotter packages.
 	"github.com/dmiprops/jotter/modules/setting"
+	"github.com/dmiprops/jotter/modules/auth"
 
 	// Vendor packages.
 	"github.com/urfave/cli"
@@ -108,9 +110,7 @@ var (
 		ArgsUsage: " ",
 	}
 
-	// ********* INNER COMMAND ********* //
-
-	// CmdInnerStart executes start web.
+	// CmdInnerStart executes start web (hidden command for inner usage).
 	CmdInnerStart = cli.Command{
 		Name:      "inner-start",
 		Usage:     "",
@@ -120,41 +120,40 @@ var (
 	}
 )
 
+// Command hundlers.
+
 func state(ctx *cli.Context) error {
 
-	fmt.Println("Run command state...")
+	fmt.Printf("Jotter version %s\n", setting.AppVer)
+
+	err := checkRun()
+	if err != nil {
+		fmt.Printf("State %s\n", err.Error())
+	} else {
+		fmt.Println("State is done")
+	}
+
+	fmt.Printf("Listening address %s\n", setting.StoredAdminSettings.Address)
+	fmt.Printf("Using databases %s\n", setting.StoredAdminSettings.Database)
 
 	return nil
 }
 
 func setPass(ctx *cli.Context) error {
+	fmt.Print("Enter new administrative password: ")
+	password, err := terminal.ReadPassword(1)
+	if err != nil {
+		return err
+	}
+	fmt.Println("")
 
-	fmt.Println("Run command setpass...")
+	hash, err := auth.HashPassword(string(password))
+	if err != nil {
+		return err
+	}
+	setting.StoredAdminSettings.Password = hash
 
-	/*
-
-		var (
-			curPass string
-			newPass string
-			valPass string
-		)
-
-		fmt.Print("Enter current password: ")
-		_, err := fmt.Scanln(&curPass)
-
-		if err != nil {
-			log.Println(err.Error())
-			return nil
-		}
-
-		fmt.Print("Enter new password: ")
-		fmt.Scanln(&newPass)
-		fmt.Print("Repeat new password: ")
-		fmt.Scanln(&valPass)
-
-		fmt.Println("Set administrative server password: " + newPass)*/
-
-	return nil
+	return setting.SaveStoredAdminSettings()
 }
 
 func setAddr(ctx *cli.Context) error {
@@ -206,44 +205,6 @@ func start(ctx *cli.Context) error {
 	return nil
 }
 
-func innerStart(ctx *cli.Context) error {
-
-	http.ListenAndServe(":"+setting.DefaultPort, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-
-		flusher, _ := w.(http.Flusher)
-
-		rdata := requestData{}
-		wdata := responseData{}
-		json.NewDecoder(r.Body).Decode(&rdata)
-		r.Body.Close()
-
-		if rdata.Method == "" {
-			// Request from browser.
-			io.WriteString(w, "We working!")
-		} else if rdata.Method == "stop" {
-			// Request method "stop".
-			wdata.Response = "OK, we closed."
-			json.NewEncoder(w).Encode(wdata)
-			flusher.Flush()
-			os.Exit(0)
-		} else {
-			// Unknown method.
-			wdata.Response = "Unknown method: " + rdata.Method + ". We running."
-			json.NewEncoder(w).Encode(wdata)
-		}
-	}))
-
-	return nil
-}
-
-type requestData struct {
-	Method string `json:"method"`
-}
-
-type responseData struct {
-	Response string `json:"response"`
-}
-
 func stop(ctx *cli.Context) error {
 
 	fmt.Println("Run command stop...")
@@ -265,6 +226,54 @@ func stop(ctx *cli.Context) error {
 	if err != nil {
 		return err
 	}
+
+	return nil
+}
+
+// ********* INNER COMMAND ********* //
+
+type requestData struct {
+	Method string `json:"method"`
+}
+
+type responseData struct {
+	Response string `json:"response"`
+}
+
+func checkRun() error {
+	w, err := http.Get(setting.Protocol + "://" + setting.StoredAdminSettings.Address + "/checkrun")
+	if err == nil {
+		return json.NewDecoder(w.Body).Decode(&responseData{})
+	}
+	return err
+}
+
+func innerStart(ctx *cli.Context) error {
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		flusher, _ := w.(http.Flusher)
+
+		rdata := requestData{}
+		wdata := responseData{}
+		json.NewDecoder(r.Body).Decode(&rdata)
+		r.Body.Close()
+
+		if rdata.Method == "" {
+			// Request from browser.
+			io.WriteString(w, "We working!")
+		} else if rdata.Method == "stop" {
+			// Request method "stop".
+			wdata.Response = "OK, we closed."
+			json.NewEncoder(w).Encode(wdata)
+			flusher.Flush()
+			os.Exit(0)
+		} else {
+			// Unknown method.
+			wdata.Response = "Unknown method: " + rdata.Method + ". We running."
+			json.NewEncoder(w).Encode(wdata)
+		}
+	}
+
+	http.ListenAndServe(setting.StoredAdminSettings.Address, http.HandlerFunc(handler))
 
 	return nil
 }
