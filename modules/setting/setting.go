@@ -1,12 +1,14 @@
 package setting
 
 import (
+	// System packages.
 	"encoding/json"
 	"os"
+	"strings"
 
 	// Jotter packages.
-	"github.com/dmiprops/jotter/modules/log"
 	"github.com/dmiprops/jotter/modules/auth"
+	"github.com/dmiprops/jotter/modules/log"
 )
 
 // Application constants.
@@ -77,7 +79,7 @@ func createDefaultAdminSettings() error {
 			Address:  ":" + DefaultPort,
 		},
 	}
-	
+
 	// Apply default settings.
 	StoredAdminSettings.Password = adminSettings.Configuration.Password
 	StoredAdminSettings.Address = adminSettings.Configuration.Address
@@ -190,4 +192,14 @@ func SaveCurrentAdminSettings() error {
 		return encoder.Encode(&adminSettings)
 	}
 	return err
+}
+
+// ConnectionStringWithoutPassword returns connection string to database without password.
+func ConnectionStringWithoutPassword(database string) string {
+	i1 := strings.Index(database, ":")
+	if i1 < 0 {
+		return database
+	}
+	i2 := strings.Index(database, "@")
+	return string([]rune(database)[:i1]) + string([]rune(database)[i2+1:])
 }

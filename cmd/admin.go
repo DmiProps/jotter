@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"golang.org/x/crypto/ssh/terminal"
+	"strings"
 
 	// Jotter packages.
 	"github.com/dmiprops/jotter/modules/setting"
@@ -157,7 +158,7 @@ func setPass(ctx *cli.Context) error {
 }
 
 func setAddr(ctx *cli.Context) error {
-
+	fmt.Print("Enter connection string to database: ")
 	fmt.Println("Run command setaddr...")
 	fmt.Println("New address: " + ctx.Args().First())
 
@@ -172,18 +173,32 @@ func getAddr(ctx *cli.Context) error {
 }
 
 func setDb(ctx *cli.Context) error {
+	setting.StoredAdminSettings.Database = ctx.Args().First()
 
-	fmt.Println("Run command setdb...")
-	fmt.Printf("New database: %s\n", ctx.Args().First())
-	fmt.Printf("Need restart: %t\n", ctx.Bool("r"))
+	err := setting.SaveStoredAdminSettings()
+	if err != nil {
+		return err
+	}
 
+	if ctx.Bool("r") {
+		err = Restart()
+		return err
+	}
 	return nil
 }
 
 func getDb(ctx *cli.Context) error {
+	storedDatabase := setting.ConnectionStringWithoutPassword(setting.StoredAdminSettings.Database)
+	currentDatabase := setting.ConnectionStringWithoutPassword(setting.CurrentAdminSettings.Database)
 
-	fmt.Println("Run command getdb...")
+	fmt.Printf("Stored database: %s\n", storedDatabase)
 
+	if strings.ToLower(storedDatabase) == strings.ToLower(currentDatabase) {
+		return nil
+	}
+	if IsRunning() {
+		fmt.Printf("Current database: %s\n", currentDatabase)
+	}
 	return nil
 }
 
@@ -276,4 +291,14 @@ func innerStart(ctx *cli.Context) error {
 	http.ListenAndServe(setting.StoredAdminSettings.Address, http.HandlerFunc(handler))
 
 	return nil
+}
+
+// Restart restarts service if it is running.
+func Restart() error {
+	return nil
+}
+
+// IsRunning returns true if service is running.
+func IsRunning() bool {
+	return false
 }
