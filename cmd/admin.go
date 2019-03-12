@@ -218,7 +218,6 @@ func getDb(ctx *cli.Context) error {
 }
 
 func start(ctx *cli.Context) error {
-
 	fmt.Println("Run command start...")
 	if ctx.IsSet("addr") {
 		fmt.Println("By address: %s\n" + ctx.String("addr"))
@@ -236,7 +235,6 @@ func start(ctx *cli.Context) error {
 }
 
 func stop(ctx *cli.Context) error {
-
 	fmt.Println("Run command stop...")
 
 	data := []byte(`{"method":"stop"}`)
