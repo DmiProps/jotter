@@ -158,17 +158,32 @@ func setPass(ctx *cli.Context) error {
 }
 
 func setAddr(ctx *cli.Context) error {
-	fmt.Print("Enter connection string to database: ")
-	fmt.Println("Run command setaddr...")
-	fmt.Println("New address: " + ctx.Args().First())
+	setting.StoredAdminSettings.Address = ctx.Args().First()
 
+	err := setting.SaveStoredAdminSettings()
+	if err != nil {
+		return err
+	}
+
+	if ctx.Bool("r") {
+		err = Restart()
+		return err
+	}
 	return nil
 }
 
 func getAddr(ctx *cli.Context) error {
+	storedAddress := setting.StoredAdminSettings.Address
+	currentAddress := setting.CurrentAdminSettings.Address
 
-	fmt.Println("Run command getaddr...")
+	fmt.Printf("Stored address: %s\n", storedAddress)
 
+	if strings.ToLower(storedAddress) == strings.ToLower(currentAddress) {
+		return nil
+	}
+	if IsRunning() {
+		fmt.Printf("Current address: %s\n", currentAddress)
+	}
 	return nil
 }
 
@@ -295,6 +310,7 @@ func innerStart(ctx *cli.Context) error {
 
 // Restart restarts service if it is running.
 func Restart() error {
+	fmt.Println("Restart jotter service...")
 	return nil
 }
 
