@@ -5,6 +5,7 @@ import (
 	"io"
 )
 
+// MainPage is handler for route "/"
 func MainPage(w http.ResponseWriter, r *http.Request) {
 
 	io.WriteString(w, "We running!")

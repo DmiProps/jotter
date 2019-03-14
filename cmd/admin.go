@@ -12,6 +12,7 @@ import (
 	"github.com/dmiprops/jotter/modules/auth"
 	"github.com/dmiprops/jotter/modules/daemon"
 	"github.com/dmiprops/jotter/modules/log"
+	"github.com/dmiprops/jotter/modules/database"
 	"github.com/dmiprops/jotter/handlers"
 
 	// Vendor packages.
@@ -253,7 +254,6 @@ func stop(ctx *cli.Context) error {
 
 func innerStart(ctx *cli.Context) error {
 	// Prepare arguments.
-	log.Info("inner-start: ", ctx.Args())
 	if ctx.IsSet("addr") {
 		setting.CurrentAdminSettings.Address = ctx.String("addr")
 	} else {
@@ -275,8 +275,14 @@ func innerStart(ctx *cli.Context) error {
 - listening address %s
 - using database %s`,
 		setting.CurrentAdminSettings.Address,
-		setting.CurrentAdminSettings.Database,
+		setting.ConnectionStringWithoutPassword(setting.CurrentAdminSettings.Database),
 	)
+
+	// Connect to database.
+	err = database.AtStart()
+	if err != nil {
+		log.Error(err.Error())
+	}
 
 	// Start listener.
 	r := mux.NewRouter()
