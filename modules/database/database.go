@@ -118,5 +118,23 @@ func createTables() error {
 		setting.AppVer,
 	)
 
+	// Table 'clients'.
+	_, err = dbConn.Exec(
+		`create table public.clients
+		(
+			id serial not null,
+			client_id character varying(50) not null,
+			domain character varying(50) not null,
+			description character varying(250),
+			password bytea,
+			method_for_data character varying(20),
+			method_for_query character varying(20),
+			first_dataimage boolean,
+			active boolean,
+			registered timestamp without time zone
+		)
+		WITHOUT OIDS;`,
+	)
+
 	return nil
 }
