@@ -2,22 +2,21 @@ package cmd
 
 import (
 	// System packages.
-	"bytes"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
-	"os"
-	"os/exec"
 	"golang.org/x/crypto/ssh/terminal"
 	"strings"
 
 	// Jotter packages.
 	"github.com/dmiprops/jotter/modules/setting"
 	"github.com/dmiprops/jotter/modules/auth"
+	"github.com/dmiprops/jotter/modules/daemon"
+	"github.com/dmiprops/jotter/modules/log"
+	"github.com/dmiprops/jotter/handlers"
 
 	// Vendor packages.
 	"github.com/urfave/cli"
+	"github.com/gorilla/mux"
 )
 
 var (
@@ -43,6 +42,12 @@ var (
 		Usage:     "Set address for listening jotter service",
 		Action:    setAddr,
 		ArgsUsage: "[host]:port (default: \":" + setting.DefaultPort + ")\"",
+		Flags: []cli.Flag{
+			cli.BoolFlag{
+				Name:  "r",
+				Usage: "restart the jotter service if running",
+			},
+		},
 	}
 
 	// CmdGetAddr shows set address and current address, if they are different.
@@ -93,10 +98,6 @@ var (
 				Usage: "database settings user:password@host:[port]",
 			},
 			cli.BoolFlag{
-				Name:  "r",
-				Usage: "restart the jotter service if running",
-			},
-			cli.BoolFlag{
 				Name:  "s",
 				Usage: "save jotter service address and database settings",
 			},
@@ -118,24 +119,37 @@ var (
 		Action:    innerStart,
 		ArgsUsage: " ",
 		Hidden:    true,
+		Flags: []cli.Flag{
+			cli.StringFlag{
+				Name:  "addr",
+				Value: "",
+				Usage: "jotter service address [host]:ip",
+			},
+			cli.StringFlag{
+				Name:  "db",
+				Value: "",
+				Usage: "database settings user:password@host:[port]",
+			},
+		},
 	}
 )
 
-// Command hundlers.
+// User command handlers.
 
 func state(ctx *cli.Context) error {
+	fmt.Printf("Version\t\t%s\n", setting.AppVer)
 
-	fmt.Printf("Jotter version %s\n", setting.AppVer)
-
-	err := checkRun()
-	if err != nil {
-		fmt.Printf("State %s\n", err.Error())
+	isRunning := daemon.CheckRun()
+	fmt.Print("State\t\t")
+	if isRunning {
+		fmt.Println("Run")
 	} else {
-		fmt.Println("State is done")
+		fmt.Println("Shutdown")
 	}
 
-	fmt.Printf("Listening address %s\n", setting.StoredAdminSettings.Address)
-	fmt.Printf("Using databases %s\n", setting.StoredAdminSettings.Database)
+	setting.ReadCurrentAdminSettings()
+	showAddr(isRunning)
+	showDb(isRunning)
 
 	return nil
 }
@@ -166,24 +180,14 @@ func setAddr(ctx *cli.Context) error {
 	}
 
 	if ctx.Bool("r") {
-		err = Restart()
-		return err
+		return daemon.RestartDaemon("inner-start")
 	}
 	return nil
 }
 
 func getAddr(ctx *cli.Context) error {
-	storedAddress := setting.StoredAdminSettings.Address
-	currentAddress := setting.CurrentAdminSettings.Address
-
-	fmt.Printf("Stored address: %s\n", storedAddress)
-
-	if strings.ToLower(storedAddress) == strings.ToLower(currentAddress) {
-		return nil
-	}
-	if IsRunning() {
-		fmt.Printf("Current address: %s\n", currentAddress)
-	}
+	setting.ReadCurrentAdminSettings()
+	showAddr(daemon.CheckRun())
 	return nil
 }
 
@@ -196,123 +200,116 @@ func setDb(ctx *cli.Context) error {
 	}
 
 	if ctx.Bool("r") {
-		err = Restart()
-		return err
+		return daemon.RestartDaemon("inner-start")
 	}
 	return nil
 }
 
 func getDb(ctx *cli.Context) error {
-	storedDatabase := setting.ConnectionStringWithoutPassword(setting.StoredAdminSettings.Database)
-	currentDatabase := setting.ConnectionStringWithoutPassword(setting.CurrentAdminSettings.Database)
-
-	fmt.Printf("Stored database: %s\n", storedDatabase)
-
-	if strings.ToLower(storedDatabase) == strings.ToLower(currentDatabase) {
-		return nil
-	}
-	if IsRunning() {
-		fmt.Printf("Current database: %s\n", currentDatabase)
-	}
+	setting.ReadCurrentAdminSettings()
+	showDb(daemon.CheckRun())
 	return nil
 }
 
 func start(ctx *cli.Context) error {
-	fmt.Println("Run command start...")
-	if ctx.IsSet("addr") {
-		fmt.Println("By address: %s\n" + ctx.String("addr"))
-	}
-	if ctx.IsSet("db") {
-		fmt.Println("Using database: %s\n" + ctx.String("db"))
-	}
-	fmt.Printf("Need restart: %t\n", ctx.Bool("r"))
-	fmt.Printf("Need save settings: %t\n", ctx.Bool("s"))
-
-	cmd := exec.Command("./jotter", "inner-start")
-	cmd.Start()
-
-	return nil
-}
-
-func stop(ctx *cli.Context) error {
-	fmt.Println("Run command stop...")
-
-	data := []byte(`{"method":"stop"}`)
-
-	rdata := bytes.NewReader(data)
-	w, err := http.Post("http://localhost:"+setting.DefaultPort, "application/json", rdata)
-	if err != nil {
-		fmt.Println("Service stoped")
-	} else {
-		wdata := responseData{}
-		json.NewDecoder(w.Body).Decode(&wdata)
-		w.Body.Close()
-
-		fmt.Println("Response: " + wdata.Response)
-	}
-
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// ********* INNER COMMAND ********* //
-
-type requestData struct {
-	Method string `json:"method"`
-}
-
-type responseData struct {
-	Response string `json:"response"`
-}
-
-func checkRun() error {
-	w, err := http.Get(setting.Protocol + "://" + setting.StoredAdminSettings.Address + "/checkrun")
-	if err == nil {
-		return json.NewDecoder(w.Body).Decode(&responseData{})
-	}
-	return err
-}
-
-func innerStart(ctx *cli.Context) error {
-	handler := func(w http.ResponseWriter, r *http.Request) {
-		flusher, _ := w.(http.Flusher)
-
-		rdata := requestData{}
-		wdata := responseData{}
-		json.NewDecoder(r.Body).Decode(&rdata)
-		r.Body.Close()
-
-		if rdata.Method == "" {
-			// Request from browser.
-			io.WriteString(w, "We working!")
-		} else if rdata.Method == "stop" {
-			// Request method "stop".
-			wdata.Response = "OK, we closed."
-			json.NewEncoder(w).Encode(wdata)
-			flusher.Flush()
-			os.Exit(0)
-		} else {
-			// Unknown method.
-			wdata.Response = "Unknown method: " + rdata.Method + ". We running."
-			json.NewEncoder(w).Encode(wdata)
+	if daemon.CheckRun() {
+		err := daemon.StopDaemon()
+		if err != nil {
+			return err
 		}
 	}
 
-	http.ListenAndServe(setting.StoredAdminSettings.Address, http.HandlerFunc(handler))
+	args := []string{"inner-start"}
+	save := ctx.Bool("s")
+
+	if ctx.IsSet("addr") {
+		args = append(args, []string{"--addr", ctx.String("addr")}...)
+		if save {
+			setting.StoredAdminSettings.Address = ctx.String("addr")
+		}
+	}
+	if ctx.IsSet("db") {
+		args = append(args, []string{"--db", ctx.String("db")}...)
+		if save {
+			setting.StoredAdminSettings.Database = ctx.String("db")
+		}
+	}
+
+	if save {
+		err := setting.SaveStoredAdminSettings()
+		if err != nil {
+			return err
+		}
+	}
+
+	return daemon.StartDaemon(args ...)
+}
+
+func stop(ctx *cli.Context) error {
+	return daemon.StopDaemon()
+}
+
+// Inner command handlers.
+
+func innerStart(ctx *cli.Context) error {
+	// Prepare arguments.
+	log.Info("inner-start: ", ctx.Args())
+	if ctx.IsSet("addr") {
+		setting.CurrentAdminSettings.Address = ctx.String("addr")
+	} else {
+		setting.CurrentAdminSettings.Address = setting.StoredAdminSettings.Address
+	}
+	if ctx.IsSet("db") {
+		setting.CurrentAdminSettings.Database = ctx.String("db")
+	} else {
+		setting.CurrentAdminSettings.Database = setting.StoredAdminSettings.Database
+	}
+	err := setting.SaveCurrentAdminSettings()
+	if err != nil {
+		log.Error(err.Error())
+		return err
+	}
+
+	// Output log information.
+	log.Info(`Start jotter service:
+- listening address %s
+- using database %s`,
+		setting.CurrentAdminSettings.Address,
+		setting.CurrentAdminSettings.Database,
+	)
+
+	// Start listener.
+	r := mux.NewRouter()
+	r.HandleFunc("/", handlers.MainPage)
+
+	http.Handle("/", r)
+	http.ListenAndServe(setting.CurrentAdminSettings.Address, nil)
 
 	return nil
 }
 
-// Restart restarts service if it is running.
-func Restart() error {
-	fmt.Println("Restart jotter service...")
-	return nil
+// Service functions.
+
+func showAddr(isRunning bool) {
+	fmt.Printf("Address\t\t%s\n", setting.StoredAdminSettings.Address)
+	if (isRunning && strings.ToLower(setting.StoredAdminSettings.Address) != strings.ToLower(setting.CurrentAdminSettings.Address)) {
+		fmt.Printf("- used\t\t%s\n", setting.CurrentAdminSettings.Address)
+	}
 }
 
-// IsRunning returns true if service is running.
-func IsRunning() bool {
-	return false
+func showDb(isRunning bool) {
+	storedDatabase := setting.ConnectionStringWithoutPassword(setting.StoredAdminSettings.Database)
+	if storedDatabase == "" {
+		storedDatabase = "<undefined>"
+	}
+	currentDatabase := setting.ConnectionStringWithoutPassword(setting.CurrentAdminSettings.Database)
+	if currentDatabase == "" {
+		currentDatabase = "<undefined>"
+	}
+
+	fmt.Printf("Database\t%s\n", storedDatabase)
+
+	if (isRunning && strings.ToLower(storedDatabase) != strings.ToLower(currentDatabase)) {
+		fmt.Printf("- used\t\t%s\n", currentDatabase)
+	}
 }

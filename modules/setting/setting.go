@@ -4,6 +4,8 @@ import (
 	// System packages.
 	"encoding/json"
 	"os"
+	"syscall"
+	"path/filepath"
 	"strings"
 
 	// Jotter packages.
@@ -18,12 +20,16 @@ const (
 	SettingsDir         string = "/etc/jotter.d"
 	StoredSettingsFile  string = "jotter.json"
 	CurrentSettingsFile string = "session.json"
+	DemonLabel          string = "com.github.dmiprops.jotter"
+	DaeminLogFile       string = "jotter.log"
+	DaeminErrFile       string = "jotter.err"
 )
 
 // Application settings.
 var (
 	AppVer   string
 	Protocol string
+	RunDir   string
 
 	StoredAdminSettings  storedAdminSettingsType
 	CurrentAdminSettings currentAdminSettingsType
@@ -41,6 +47,8 @@ type currentAdminSettingsType struct {
 }
 
 func init() {
+	RunDir, _ = filepath.Abs(filepath.Dir(os.Args[0]))
+
 	err := InitSettings()
 	if err != nil {
 		log.Fatal(err.Error())
@@ -57,6 +65,7 @@ func InitSettings() error {
 		}
 		return createDefaultAdminSettings()
 	}
+	syscall.Umask(0)
 	err = os.Mkdir(SettingsDir, 0777)
 	if err == nil {
 		return createDefaultAdminSettings()
@@ -86,6 +95,7 @@ func createDefaultAdminSettings() error {
 	StoredAdminSettings.Database = adminSettings.Configuration.Database
 
 	// Store defailt settings.
+	syscall.Umask(0)
 	f, err := os.Create(path)
 	if err == nil {
 		defer f.Close()
@@ -136,6 +146,7 @@ func SaveStoredAdminSettings() error {
 	}
 
 	// Save stored administrative settings.
+	syscall.Umask(0)
 	f, err := os.Create(path)
 	if err == nil {
 		defer f.Close()
@@ -178,8 +189,8 @@ func SaveCurrentAdminSettings() error {
 	}{
 		Version: AppVer,
 		Configuration: currentAdminSettingsType{
-			Address:  StoredAdminSettings.Address,
-			Database: StoredAdminSettings.Database,
+			Address:  CurrentAdminSettings.Address,
+			Database: CurrentAdminSettings.Database,
 		},
 	}
 
@@ -201,5 +212,5 @@ func ConnectionStringWithoutPassword(database string) string {
 		return database
 	}
 	i2 := strings.Index(database, "@")
-	return string([]rune(database)[:i1]) + string([]rune(database)[i2+1:])
+	return string([]rune(database)[:i1]) + string([]rune(database)[i2:])
 }
